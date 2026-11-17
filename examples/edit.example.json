@@ -9,6 +9,7 @@
   "clips": [
     {"src": "footage/DJI_0001.MP4", "in": 0.5, "out": 3.0, "crop_x": 0.3},
     {"src": "footage/DJI_0002.MP4", "in": 1.0, "out": 4.0, "speed": 2.0},
-    {"src": "footage/DJI_0001.MP4", "in": 8.5, "out": 11.0, "fit": "pad"}
+    {"src": "footage/DJI_0001.MP4", "in": 8.5, "out": 11.0, "fit": "pad"},
+    {"src": "photos/IMG_0102.HEIC", "duration": 2.5, "crop_y": 0.3}
   ]
 }

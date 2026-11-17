@@ -1,6 +1,6 @@
 # vidpipe
 
-Agentic video editing with ffmpeg. Claude looks at your footage through contact sheets and transcripts, writes an edit list, and `vidpipe.py` renders it.
+Agentic video editing with ffmpeg. Claude looks at your footage through contact sheets and transcripts, writes an edit list, and `vidpipe.py` renders it. Works with video clips and still photos (JPG, PNG, HEIC).
 
 No Resolve, no cloud uploads, no GPU needed. Runs on any Mac.
 
@@ -28,11 +28,12 @@ Claude probes the clips, reads contact sheets, writes `edit.json`, renders a dra
 
 | Command | Does |
 |---|---|
-| `probe <dir>` | List clips: duration, resolution, fps, audio → `media.json` |
+| `probe <dir>` | List clips (duration, resolution, fps, audio) and photos (size) → `media.json` |
 | `scenes <clip>` | Shot boundaries → `<clip>.scenes.json` |
 | `sheet <clip>` | Timestamped contact-sheet image (how Claude "sees" footage) |
+| `sheet <photo folder>` | Photo contact sheets, 16 per sheet, labelled by filename |
 | `transcribe <clip>` | Timed transcript via mlx-whisper / whisper |
-| `render <edit.json> [--draft]` | Render an edit list: trims, reframes, speed, LUT, captions, music, fades |
+| `render <edit.json> [--draft]` | Render an edit list: trims, reframes, speed, LUT, captions, music, fades, held photos |
 
 Edit list schema: see `skill/vidpipe/SKILL.md`.
 
@@ -40,6 +41,8 @@ Edit list schema: see `skill/vidpipe/SKILL.md`.
 
 - No keyframed motion, transitions beyond fades, or titles. Use Resolve or Remotion for those.
 - Grading is LUT-only.
+- Photos are held as still frames (no zoom or pan). RAW/DNG is not supported.
+- Color is not normalized across sources yet. Photos render in standard HD color (BT.709) and match standard footage; mixing in HDR clips or clips without color tags can shift colors.
 - `scenes` is brightness-based and can miss cuts between similar-looking shots. The skill has Claude check contact sheets instead of relying on it.
 
 ## Where to run it
