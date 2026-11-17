@@ -9,7 +9,8 @@ The agent's loop:
   4. transcribe  -> speech-to-text, for talking/interview footage (optional)
   5. render      -> the agent writes an edit list (JSON), this renders it
 
-Only dependency besides Python 3.10+ is ffmpeg/ffprobe on PATH.
+Only dependency besides Python 3.10+ is ffmpeg/ffprobe. sheet needs the
+drawtext filter and captions need subtitles, so use Homebrew's ffmpeg-full.
 Transcription optionally uses mlx-whisper (Apple Silicon) or openai-whisper.
 
 MIT License.
@@ -17,6 +18,7 @@ MIT License.
 
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -34,6 +36,14 @@ ASPECTS = {
     "4:5": (1080, 1350),
 }
 
+# Homebrew's default ffmpeg ships without drawtext/subtitles, which sheet and
+# captions need. ffmpeg-full has them but is keg-only (not on PATH), so prefer
+# it whenever it is installed.
+for _keg in ("/opt/homebrew/opt/ffmpeg-full/bin", "/usr/local/opt/ffmpeg-full/bin"):
+    if Path(_keg, "ffmpeg").exists():
+        os.environ["PATH"] = _keg + os.pathsep + os.environ.get("PATH", "")
+        break
+
 
 # ---------- helpers ----------
 
@@ -49,7 +59,27 @@ def run(cmd: list[str], quiet: bool = True) -> subprocess.CompletedProcess:
 
 def need(binary: str) -> None:
     if not shutil.which(binary):
-        sys.exit(f"missing dependency: {binary} (install with: brew install ffmpeg)")
+        sys.exit(f"missing dependency: {binary} (install with: brew install ffmpeg-full)")
+
+
+def need_filter(name: str) -> None:
+    """Exit with a useful hint if this ffmpeg build lacks a filter."""
+    res = subprocess.run(["ffmpeg", "-hide_banner", "-h", f"filter={name}"],
+                         capture_output=True, text=True)
+    if "Unknown filter" in res.stdout + res.stderr:
+        sys.exit(f"this ffmpeg build has no '{name}' filter "
+                 f"(install with: brew install ffmpeg-full)")
+
+
+def ff_quote(path: str) -> str:
+    """Quote a file path for use as a filter option value.
+
+    ffmpeg parses a filter string twice. The option parser treats \\ ' : as
+    special, so escape those first; then the filtergraph parser handles quotes,
+    where a literal ' inside a quoted string has to be written as '\\''.
+    """
+    s = path.replace("\\", "\\\\").replace("'", "\\'").replace(":", "\\:")
+    return "'" + s.replace("'", "'\\''") + "'"
 
 
 def probe_file(path: Path) -> dict:
@@ -92,17 +122,22 @@ def ts(seconds: float) -> str:
 # ---------- commands ----------
 
 def cmd_probe(args) -> None:
-    """Probe a file or every video in a folder; write media.json."""
+    """Probe a file or every video in a folder.
+
+    A folder writes media.json. A single file only prints, unless --out is
+    given, so checking a render never overwrites the footage inventory.
+    """
     target = Path(args.path)
     files = [target] if target.is_file() else sorted(
         p for p in target.rglob("*") if p.suffix.lower() in VIDEO_EXTS)
     if not files:
         sys.exit(f"no video files found in {target}")
     media = [probe_file(f) for f in files]
-    out = Path(args.out)
-    out.write_text(json.dumps(media, indent=2))
+    out = args.out or (None if target.is_file() else "media.json")
+    if out:
+        Path(out).write_text(json.dumps(media, indent=2))
     total = sum(m["duration"] for m in media)
-    print(f"{len(media)} clips, {ts(total)} total -> {out}")
+    print(f"{len(media)} clips, {ts(total)} total" + (f" -> {out}" if out else ""))
     for m in media:
         print(f"  {Path(m['file']).name:40s} {ts(m['duration'])}  "
               f"{m['width']}x{m['height']}@{m['fps']}  audio={m['has_audio']}")
@@ -135,6 +170,7 @@ def cmd_sheet(args) -> None:
     This is how the agent 'sees' footage: it reads the PNG, judges shots,
     and picks in/out points by timestamp.
     """
+    need_filter("drawtext")
     src = Path(args.file)
     info = probe_file(src)
     dur, n = info["duration"], args.frames
@@ -175,8 +211,8 @@ def cmd_transcribe(args) -> None:
              "--output_format", "json", "--output_dir", str(outdir)])
     else:
         sys.exit("no whisper found. Install one:\n"
-                 "  pip3 install mlx-whisper      # Apple Silicon, fastest\n"
-                 "  pip3 install openai-whisper   # anywhere")
+                 "  uv tool install --python 3.14 mlx-whisper   # Apple Silicon, fastest\n"
+                 "  pip3 install openai-whisper                 # anywhere")
     raw = outdir / (src.stem + ".json")
     data = json.loads(raw.read_text())
     # Compact form the agent can read cheaply: one line per segment
@@ -194,7 +230,7 @@ def build_clip_filter(clip: dict, w: int, h: int, fps: int, lut: str | None) -> 
     if speed != 1.0:
         f.append(f"setpts=PTS/{speed}")
     if lut:
-        f.append(f"lut3d='{lut}'")
+        f.append(f"lut3d={ff_quote(lut)}")
     mode = clip.get("fit", "crop")
     if mode == "crop":
         # Fill the frame, then crop. crop_x/crop_y (0..1) pick which part to keep,
@@ -219,7 +255,10 @@ def cmd_render(args) -> None:
     edl_path = Path(args.edl)
     edl = json.loads(edl_path.read_text())
     base = edl_path.parent  # clip paths in the EDL are relative to the EDL file
-    w, h = ASPECTS[edl.get("aspect", "16:9")]
+    aspect = edl.get("aspect", "16:9")
+    if aspect not in ASPECTS:
+        sys.exit(f"unknown aspect {aspect!r} (use one of: {', '.join(ASPECTS)})")
+    w, h = ASPECTS[aspect]
     fps = edl.get("fps", 30)
     lut = edl.get("lut")
     if lut:
@@ -230,6 +269,16 @@ def cmd_render(args) -> None:
     clips = edl["clips"]
     if not clips:
         sys.exit("edit list has no clips")
+    # Catch bad values before rendering anything
+    for i, clip in enumerate(clips):
+        if not clip.get("speed", 1.0) > 0:
+            sys.exit(f"clip {i}: speed must be greater than 0 (got {clip['speed']})")
+    planned = sum((c["out"] - c["in"]) / c.get("speed", 1.0) for c in clips)
+    if fade * 2 > planned:
+        sys.exit(f"fade of {fade}s is too long for a {planned:.2f}s timeline "
+                 f"(max {planned / 2:.2f}s)")
+    if edl.get("captions"):
+        need_filter("subtitles")
     # Draft mode renders fast and small for review; final uses higher quality.
     preset, crf = ("ultrafast", 30) if args.draft else ("medium", 18)
 
@@ -276,8 +325,8 @@ def cmd_render(args) -> None:
         if fade:
             vf += [f"fade=t=in:st=0:d={fade}", f"fade=t=out:st={total - fade}:d={fade}"]
         if edl.get("captions"):
-            srt = str((base / edl["captions"]).resolve()).replace(":", r"\:")
-            vf.append(f"subtitles='{srt}':force_style='FontSize=14,Outline=2'")
+            srt = ff_quote(str((base / edl["captions"]).resolve()))
+            vf.append(f"subtitles={srt}:force_style='FontSize=14,Outline=2'")
         music = edl.get("music")
         if music:
             inputs += ["-stream_loop", "-1", "-i", str((base / music["src"]).resolve())]
@@ -312,7 +361,8 @@ def main() -> None:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("probe", help="list clips with duration/res/fps/audio")
-    s.add_argument("path"); s.add_argument("--out", default="media.json")
+    s.add_argument("path")
+    s.add_argument("--out", help="default: media.json for a folder, print only for one file")
     s.set_defaults(fn=cmd_probe)
 
     s = sub.add_parser("scenes", help="detect shot changes in a clip")

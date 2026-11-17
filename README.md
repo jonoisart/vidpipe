@@ -7,12 +7,14 @@ No Resolve, no cloud uploads, no GPU needed. Runs on any Mac.
 ## Install (macOS)
 
 ```zsh
-brew install ffmpeg
-pip3 install mlx-whisper            # optional: transcription for talking footage
+brew install ffmpeg-full                    # not plain ffmpeg: that build has no drawtext/subtitles
+uv tool install --python 3.14 mlx-whisper   # optional: transcription for talking footage
 
 # Install as a Claude Code skill (folder is self-contained)
 cp -R skill/vidpipe ~/.claude/skills/
 ```
+
+`ffmpeg-full` is keg-only, so Homebrew leaves it off your `PATH`. vidpipe finds it without any setup. Contact sheets need its `drawtext` filter and burned captions need `subtitles`; the default `ffmpeg` formula has neither. Homebrew's Python refuses a system-wide `pip3 install` (PEP 668), which is why whisper goes in with `uv tool install`.
 
 ## Use
 
