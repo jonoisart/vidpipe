@@ -1,6 +1,6 @@
 # vidpipe
 
-Agentic video editing with ffmpeg. Claude looks at your footage through contact sheets and transcripts, writes an edit list, and `vidpipe.py` renders it. Works with video clips and still photos (JPG, PNG, HEIC).
+Agentic video editing with ffmpeg. Claude looks at your footage through contact sheets and transcripts, writes an edit list, and `vidpipe.py` renders it. Works with video clips and still photos (JPG, PNG, HEIC, camera RAW).
 
 No Resolve, no cloud uploads, no GPU needed. Runs on any Mac.
 
@@ -22,7 +22,7 @@ From Claude Code, in a folder that has your footage:
 
 > Make a 30-second 9:16 reel from the drone clips in ./footage, warm LUT from ./luts, music from ./music/track.mp3. Draft first.
 
-Claude probes the clips, reads contact sheets, writes `edit.json`, renders a draft, checks it, and shows you before the final render.
+Claude probes the clips, reads contact sheets, asks you what it can't know (format, length, sound, on-screen text, speed changes), and shows you a shot list. Nothing renders until you approve that plan. Then it renders a draft, checks it, and shows you before the final render.
 
 ## Commands
 
@@ -33,16 +33,17 @@ Claude probes the clips, reads contact sheets, writes `edit.json`, renders a dra
 | `sheet <clip>` | Timestamped contact-sheet image (how Claude "sees" footage) |
 | `sheet <photo folder>` | Photo contact sheets, 16 per sheet, labelled by filename |
 | `transcribe <clip>` | Timed transcript via mlx-whisper / whisper |
-| `render <edit.json> [--draft]` | Render an edit list: trims, reframes, speed, LUT, captions, music, fades, held photos |
+| `plan <edit.json>` | Check an edit list and print it as a shot list to approve. Flags speed changes. Renders nothing |
+| `render <edit.json> [--draft]` | Render an edit list: trims, reframes, speed, LUT, captions, music, fades, photos held still or with Ken Burns zoom and pan |
 
 Edit list schema: see `skill/vidpipe/SKILL.md`.
 
 ## Limits
 
-- No keyframed motion, transitions beyond fades, or titles. Use Resolve or Remotion for those.
+- No zoom or pan on video clips, no transitions beyond fades, no titles. Use Resolve or Remotion for those.
 - Grading is LUT-only.
-- Photos are held as still frames (no zoom or pan). RAW/DNG is not supported.
-- Color is not normalized across sources yet. Photos render in standard HD color (BT.709) and match standard footage; mixing in HDR clips or clips without color tags can shift colors.
+- Photos are held still or moved with a straight-line zoom and pan (Ken Burns). Camera RAW needs macOS (`sips`) and gets Apple's default rendering.
+- Every source is converted to standard HD color (BT.709). HDR (HLG, PQ) is tone-mapped with fixed settings that were tuned on test patterns, not graded per clip.
 - `scenes` is brightness-based and can miss cuts between similar-looking shots. The skill has Claude check contact sheets instead of relying on it.
 
 ## Where to run it
